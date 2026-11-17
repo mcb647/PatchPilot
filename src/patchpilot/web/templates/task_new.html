@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}新建分析任务 &middot; PatchPilot{% endblock %}
+{% block content %}
+<p class="breadcrumb"><a href="/tasks">&larr; 任务列表</a></p>
+<h1>新建分析任务</h1>
+
+{% if from_task_id %}
+<div class="notice notice-info">已载入任务 <code>{{ from_task_id }}</code> 的历史参数。确认或修改后点击“提交任务”会生成新的任务。</div>
+{% endif %}
+{% if notice %}<div class="notice notice-warn">{{ notice }}</div>{% endif %}
+{% if config_error %}<div class="notice notice-warn">{{ config_error }}（任务提交可能被拒绝，请先在设置页修复）</div>{% endif %}
+{% if error_message %}<div class="notice notice-error" role="alert">{{ error_message }}</div>{% endif %}
+
+<form id="task-form" class="task-form" method="post" action="/tasks" data-task-form>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="task_key" value="{{ task_key }}">
+
+  <section>
+    <h2>比较端点</h2>
+    <p class="meta">
+      工作区/暂存区模式比较当前工作区；commit / range 模式只读取 Git 对象，
+      不受脏工作区影响。命令与仓库路径由服务器决定，表单只提交受限参数。
+    </p>
+    <label class="field-label" for="mode">比较模式</label>
+    <select id="mode" name="mode" class="{% if error_fields.mode %}field-invalid{% endif %}" title="选择比较两类快照的方式">
+      {% for option in mode_options %}
+      <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}（{{ option.value }}）</option>
+      {% endfor %}
+    </select>
+    {% if error_fields.mode %}<p class="field-error" role="alert">{{ error_fields.mode }}</p>{% endif %}
+
+    <div class="endpoint-preview" id="task-endpoint-preview" data-endpoint-preview data-default-base="{{ default_base }}">
+      <span class="meta">端点预览：</span>
+      <strong data-endpoint-text>{{ endpoint_preview.text }}</strong>
+      <p class="meta" data-endpoint-hint>{{ endpoint_preview.hint }}</p>
+      <p class="meta">当前选择：<span data-endpoint-mode>{{ endpoint_preview.mode_label }}</span> &middot; 修改下方引用会实时更新预览。</p>
+    </div>
+
+    <div class="form-grid">
+      <div class="task-mode-field" data-modes="base">
+        <label for="base_ref">基线分支（base 模式）
+          <input id="base_ref" type="text" name="base_ref" value="{{ form.base_ref }}" maxlength="200" placeholder="例如 main" class="{% if error_fields.base_ref %}field-invalid{% endif %}">
+        </label>
+        <p class="field-help">留空时使用 <code>{{ default_base }}</code>（配置中的 git.base）。</p>
+        {% if error_fields.base_ref %}<p class="field-error" role="alert">{{ error_fields.base_ref }}</p>{% endif %}
+      </div>
+      <div class="task-mode-field" data-modes="commit">
+        <label for="commit_ref">提交引用（commit 模式）
+          <input id="commit_ref" type="text" name="commit_ref" value="{{ form.commit_ref }}" maxlength="200" placeholder="例如 HEAD 或 abc1234" class="{% if error_fields.commit_ref %}field-invalid{% endif %}">
+        </label>
+        {% if error_fields.commit_ref %}<p class="field-error" role="alert">{{ error_fields.commit_ref }}</p>{% endif %}
+      </div>
+      <div class="task-mode-field" data-modes="range">
+        <label for="range_spec">提交区间（range 模式）
+          <input id="range_spec" type="text" name="range_spec" value="{{ form.range_spec }}" maxlength="300" placeholder="例如 main..feature 或 main...feature" class="{% if error_fields.range_spec %}field-invalid{% endif %}">
+        </label>
+        <p class="field-help">两点 A..B 比较两个提交树；三点 A...B 比较共同祖先与 B。</p>
+        {% if error_fields.range_spec %}<p class="field-error" role="alert">{{ error_fields.range_spec }}</p>{% endif %}
+      </div>
+      <div class="task-mode-field" data-modes="working-tree">
+        <label class="checkbox">
+          <input type="checkbox" name="include_untracked" value="1"{% if form.include_untracked %} checked{% endif %}>
+          包含未跟踪文件（仅 working-tree 模式）
+        </label>
+        {% if error_fields.include_untracked %}<p class="field-error" role="alert">{{ error_fields.include_untracked }}</p>{% endif %}
+      </div>
+    </div>
+
+    <details class="advanced-task-options" data-modes="commit">
+      <summary>高级选项：父提交序号（merge commit）</summary>
+      <label for="parent_index">父提交序号（1 起，仅 commit 模式）
+        <input id="parent_index" type="number" name="parent_index" value="{{ form.parent_index }}" min="1" max="64" placeholder="1" class="{% if error_fields.parent_index %}field-invalid{% endif %}">
+      </label>
+      <p class="field-help">合并提交（多个父提交）必须指定父序号；普通提交留空。</p>
+      {% if error_fields.parent_index %}<p class="field-error" role="alert">{{ error_fields.parent_index }}</p>{% endif %}
+    </details>
+  </section>
+
+  <section class="judge-section">
+    <h2>Judge 判定（可选）</h2>
+    {% if judge_info.configured %}
+    <label class="checkbox">
+      <input type="checkbox" name="judge" id="judge-toggle" value="1" data-judge-toggle{% if form.judge %} checked{% endif %}>
+      为本次任务启用 Judge 判定（会向配置的适配器发送裁剪后的证据片段）
+    </label>
+    {% else %}
+    <p class="notice notice-warn">{{ judge_info.disabled_reason }}</p>
+    <label class="checkbox disabled">
+      <input type="checkbox" disabled>
+      为本次任务启用 Judge 判定（当前不可用）
+    </label>
+    {% endif %}
+    <div class="judge-details" id="judge-details" data-judge-details>
+      <dl class="facts">
+        <dt>可用 provider</dt>
+        <dd>
+          {{ judge_info.provider_text }}
+          {% if judge_info.jev_model %}<span class="meta">（JEV 模型：{{ judge_info.jev_model }}）</span>{% endif %}
+          {% if judge_info.llm_model %}<span class="meta">（LLM 模型：{{ judge_info.llm_model }}）</span>{% endif %}
+        </dd>
+        <dt>发送范围</dt>
+        <dd>{{ judge_info.send_scope }}</dd>
+        <dt>预算</dt>
+        <dd>最多 {{ judge_info.max_attempts }} 次尝试 &middot; {{ judge_info.max_total_tokens }} tokens &middot; {{ judge_info.run_deadline_seconds }} 秒</dd>
+        <dt>单次输入上限</dt>
+        <dd>约 {{ judge_info.max_input_tokens_per_attempt }} tokens</dd>
+      </dl>
+      <p class="meta">Judge 是静态推断结果，仅供参考；不勾选时不会发生任何外发。</p>
+    </div>
+  </section>
+
+  <div class="form-actions">
+    <button class="button button-primary" type="submit">提交任务</button>
+    <a class="button" href="/tasks">返回任务列表</a>
+  </div>
+</form>
+<script src="/static/task-form.js" defer></script>
+{% endblock %}

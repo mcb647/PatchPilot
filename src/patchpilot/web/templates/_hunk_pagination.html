@@ -1,0 +1,28 @@
+{% if hunk_total %}
+<p class="meta hunk-pager-info">
+  共 {{ hunk_total }} 个 hunk
+  {% if hunk_pagination.total_pages > 1 %}
+  &middot; 当前显示第 {{ hunk_pagination.shown_from }}-{{ hunk_pagination.shown_to }} 个
+  &middot; 第 {{ hunk_pagination.page }} / {{ hunk_pagination.total_pages }} 页
+  {% else %}
+  &middot; 单页显示
+  {% endif %}
+</p>
+{% endif %}
+{% if hunk_pagination.total_pages > 1 %}
+<nav class="pager hunk-pager" aria-label="文件内差异块分页">
+  {% if hunk_pagination.has_prev %}
+  <a class="button" href="{{ hunk_pagination.prev_fallback_url }}"
+     {% if hunk_pagination.fragment %}data-fragment-href="{{ hunk_pagination.prev_url }}"{% endif %}>上一页</a>
+  {% else %}
+  <span class="button disabled">上一页</span>
+  {% endif %}
+  <span class="meta">第 {{ hunk_pagination.page }} / {{ hunk_pagination.total_pages }} 页</span>
+  {% if hunk_pagination.has_next %}
+  <a class="button" href="{{ hunk_pagination.next_fallback_url }}"
+     {% if hunk_pagination.fragment %}data-fragment-href="{{ hunk_pagination.next_url }}"{% endif %}>下一页</a>
+  {% else %}
+  <span class="button disabled">下一页</span>
+  {% endif %}
+</nav>
+{% endif %}

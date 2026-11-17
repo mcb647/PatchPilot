@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}PatchPilot{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">PatchPilot</a>
+  <span class="tagline">本地分析工作台</span>
+  {% if m1_enabled %}
+  <nav class="topnav">
+    <a href="/"{% if active == "history" %} class="active"{% endif %}>历史</a>
+    <a href="/tasks/new" class="button button-small">新建分析</a>
+    <a href="/tasks"{% if active == "tasks" %} class="active"{% endif %}>任务</a>
+    <a href="/settings"{% if active == "settings" %} class="active"{% endif %}>设置</a>
+  </nav>
+  {% endif %}
+</header>
+<main class="page">
+{% block content %}{% endblock %}
+</main>
+<footer class="page-footer">
+  PatchPilot &middot; 本地服务端渲染 Dashboard &middot; 仅本地静态资源，不外联
+</footer>
+</body>
+</html>

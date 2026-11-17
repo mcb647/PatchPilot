@@ -1,0 +1,475 @@
+{% extends "base.html" %}
+{% block title %}{{ run.run_id }} &middot; PatchPilot{% endblock %}
+{% block head_extra %}<script src="/static/run-detail.js" defer></script>{% endblock %}
+{% block content %}
+<p class="breadcrumb"><a href="/">&larr; 分析历史</a></p>
+<h1>{{ run.display_name }} · 分析结果</h1>
+{% if impact.page == 1 %}
+  {% set first_current_call = impact_groups | map(attribute="candidates") | sum(start=[])
+    | selectattr("side", "equalto", "after") | selectattr("evidence", "equalto", "call_path")
+    | selectattr("candidate") | sort(attribute="min_depth") | first %}
+{% endif %}
+<section id="summary" class="result-overview" aria-label="分析摘要" data-summary="{{ run.summary }}">
+  <p class="badges">
+    <span class="status status-{{ run.status }}" title="{{ run.status }}">分析{{ status_label }}</span>
+    <span class="chip" title="{{ run.mode }}">{{ mode_label }}</span>
+    {% if metrics_truncated %}<span class="chip chip-warn">部分证据超出分析上限</span>{% endif %}
+  </p>
+  {% if run.status == "running" %}
+  <h2>正在分析这次改动</h2>
+  {% elif run.status == "failed" %}
+  <h2>分析失败</h2>
+  <p>先查看诊断了解失败原因，再决定是否重新分析。</p>
+  {% elif run.status == "partial" or run.summary == "unknown" %}
+  <h2>这次只能看到部分结果</h2>
+  <p>已取得的证据可以查看。请先检查分析范围与限制，再判断这次改动的影响。</p>
+  {% elif run.summary == "no_changes" %}
+  <h2>所选范围内没有记录到文件改动</h2>
+  {% elif counts.candidates %}
+  <h2>改了 {{ counts.changes }} 个文件，找到 {{ counts.candidates }} 条待核对的影响线索</h2>
+  <p>这些线索来自代码里的调用或依赖关系。同一位置可在改动前后分别计数，实际行为还需结合代码或测试确认。</p>
+  {% else %}
+  <h2>改了 {{ counts.changes }} 个文件，在可解析的关系里未找到影响线索</h2>
+  {% endif %}
+  {% if first_current_call %}
+  <p class="result-next"><strong>可以先核对</strong> <a href="#impact-{{ first_current_call.candidate_id }}"><code>{{ first_current_call.candidate.display_name }}</code></a>{% if first_current_call.min_depth == 1 and first_current_call.seed %}。改动后的代码中，它调用了改过的 <code>{{ first_current_call.seed.display_name }}</code>。{% else %} <span class="meta">改动后沿调用关系找到</span>{% endif %}</p>
+  {% endif %}
+  {% if counts.candidates and not judge %}
+  <p>这次分析记录里没有语义判断结果。</p>
+  {% endif %}
+  {% if counts.tests %}
+  <p>{{ counts.tests }} 条测试建议，尚未由 PatchPilot 执行。{% if tests.page == 1 and tests_weak and not tests_strong %}这些建议来自导入或命名等弱关联，适合作为排查线索。{% endif %}</p>
+  {% endif %}
+  <div class="result-actions">
+    {% if run.status == "failed" %}
+    <a class="button button-primary" href="#diagnostics">查看失败原因</a>
+    {% elif run.status == "partial" or coverage.has_gap %}
+    <a class="button button-primary" href="#coverage">查看分析限制</a>
+    {% elif counts.candidates %}
+    <a class="button button-primary" href="#impact">查看可能受影响的代码</a>
+    {% endif %}
+    {% if counts.changes %}<a class="button" href="#files">查看改了哪些文件</a>{% endif %}
+    {% if counts.tests %}<a class="button" href="#tests">查看测试建议</a>{% endif %}
+  </div>
+</section>
+
+<nav class="anchors" aria-label="页面锚点">
+  <a href="#files">文件变更（{{ counts.changes }}）</a>
+  <a href="#impact">影响关系（{{ counts.candidates }}）</a>
+  <a href="#tests">测试建议（{{ counts.tests }}）</a>
+  <a href="#coverage">分析范围与限制</a>
+  <a href="#diagnostics">诊断</a>
+  {% if symbol_changes_total %}<a href="#symbol-changes">符号变更（{{ symbol_changes_total }}）</a>{% endif %}
+  {% if judge %}<a href="#judge">Judge</a>{% endif %}
+</nav>
+
+<details class="analysis-metadata">
+  <summary>分析编号、提交与时间</summary>
+  <dl class="facts">
+    <dt>分析编号</dt>
+    <dd><code>{{ run.run_id }}</code></dd>
+    <dt>仓库</dt>
+    <dd>{{ run.display_name }}{% if run.repo_root %} <code class="path">{{ run.repo_root }}</code>{% endif %}</dd>
+    <dt>分支</dt>
+    <dd>{{ branch_label }}</dd>
+    <dt>比较端点</dt>
+    <dd><code>{{ run.endpoint_before }}</code> &rarr; <code>{{ run.endpoint_after }}</code></dd>
+    <dt>开始时间</dt>
+    <dd>{{ run.started_at }}</dd>
+    <dt>结束时间</dt>
+    <dd>{{ run.finished_at or "-" }}</dd>
+    <dt>分析器版本</dt>
+    <dd>{{ run.analyzer_version }}</dd>
+    <dt>快照范围</dt>
+    <dd>旧侧 {{ scope.before_files }} 个文件 / 新侧 {{ scope.after_files }} 个文件（Python {{ scope.before_python }} / {{ scope.after_python }}）</dd>
+  </dl>
+
+{% if task_source %}
+<section id="task-source" class="task-source">
+  <h2>任务来源</h2>
+  <p>
+    分析任务
+    {% if task_source.link %}<a href="{{ task_source.link }}"><code>{{ task_source.task_id }}</code></a>{% else %}<code>{{ task_source.task_id }}</code>{% endif %}
+    {% if task_source.found %}
+    （{{ task_source.params_summary or task_source.mode_label }} &middot; {{ task_source.status_label }}）
+    {% else %}
+    （任务记录不存在或已被清理）
+    {% endif %}
+  </p>
+</section>
+{% endif %}
+</details>
+
+<section id="coverage">
+  <h2>分析范围与限制</h2>
+  {% if coverage.has_gap %}
+  <div class="notice notice-warn">
+    <p>{{ coverage.summary }}</p>
+    <ul class="coverage-items">
+      {% for item in coverage.gap_items %}<li>{{ item.label }}：{{ item.count }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% else %}
+  <div class="notice"><p>{{ coverage.summary }}</p></div>
+  {% endif %}
+</section>
+
+<section id="files">
+  <h2>文件变更 <span class="meta">共 {{ change_total }} 个文件</span></h2>
+  <form class="file-search" method="get" action="/runs/{{ run.run_id }}#files" role="search">
+    <label for="file-q">按路径筛选</label>
+    <input id="file-q" type="text" name="file_q" value="{{ file_query }}" maxlength="200"
+           placeholder="例如 pricing 或 pkg/">
+    <button type="submit" class="button">筛选</button>
+    {% if has_file_query %}
+    <a class="button" href="/runs/{{ run.run_id }}#files">清除</a>
+    <span class="meta">匹配 {{ change_filtered_count }} / {{ change_total }} 个文件</span>
+    {% endif %}
+  </form>
+  {% if changes %}
+  <table class="grid run-files">
+    <thead>
+      <tr>
+        <th>路径</th><th>类型</th><th>分析状态</th>
+        <th class="num">变更行（旧/新）</th><th class="num">符号数</th><th>差异</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for change in changes %}
+      <tr>
+        <td><code>{{ change.display_path }}</code></td>
+        <td title="{{ change.kind }}">{{ change.kind_label }}</td>
+        <td>
+          <span title="{{ change.analysis_status }}">{{ change.analysis_status_label }}</span>
+          {% if change.diff_truncated %}<span class="warn-marker" title="diff evidence truncated">差异已截断</span>{% endif %}
+        </td>
+        <td class="num">{{ change.old_changed_lines }} / {{ change.new_changed_lines }}</td>
+        <td class="num">{{ change.symbol_change_count }}</td>
+        <td>
+          <details class="change-diff" data-src="{{ change.fragment_url }}" data-fallback="{{ change.page_url }}">
+            <summary>{% if change.has_hunks %}展开差异（按需加载）{% else %}展开文件状态（按需加载）{% endif %}</summary>
+            <div class="diff-slot"><a href="{{ change.page_url }}">无脚本时打开该文件差异页</a></div>
+          </details>
+          {% if not change.has_hunks %}<span class="meta">{{ change.evidence_label }}</span>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  {% if has_file_query %}
+  <p class="muted">没有路径匹配 “{{ file_query }}” 的文件变更；<a href="/runs/{{ run.run_id }}#files">清除筛选</a>。</p>
+  {% else %}
+  <p class="muted">这些端点之间没有记录文件变更。</p>
+  {% endif %}
+  {% endif %}
+</section>
+
+<section id="impact">
+  <h2>
+    可能受影响的代码
+    <a class="button button-small" href="/runs/{{ run.run_id }}/impact">打开关系图</a>
+  </h2>
+  <p class="meta">
+    按改动的函数、类或模块查看关联代码。第 {{ impact.page }} / {{ impact.total_pages }} 页，共 {{ impact.total }} 条线索
+    （本页 {{ impact.shown_from }}&ndash;{{ impact.shown_to }}）。
+  </p>
+  {% if impact_groups %}
+    {% for group in impact_groups %}
+    <div class="impact-group">
+      <h3>
+        {% set changed_symbol = group.symbol_change.new or group.symbol_change.old or group.candidates[0].seed %}
+        <code title="{{ group.symbol_change.symbol_change_id }}">{{ changed_symbol.display_name if changed_symbol else group.symbol_change.symbol_change_id }}</code>
+        <span class="chip">{{ group.symbol_change.kind_label }}</span>
+        <span class="meta" title="{{ group.symbol_change.reason }}">{{ group.symbol_change.reason_label }}</span>
+        &middot; 本页 {{ group.candidates|length }} 条线索
+      </h3>
+      <ul class="candidate-shortlist">
+        {% for candidate in group.candidates %}
+        <li id="impact-{{ candidate.candidate_id }}" data-candidate-id="{{ candidate.candidate_id }}">
+          <code>{{ candidate.candidate.display_name if candidate.candidate else candidate.candidate_symbol_id }}</code>
+          {% if candidate.candidate %}<span class="meta">{{ candidate.candidate.path }}:{{ candidate.candidate.def_line }}</span>{% endif %}
+          <span class="meta">
+            相隔 {{ candidate.min_depth }} 层关系 &middot;
+            <span title="{{ candidate.side }}">{{ "改动后" if candidate.side == "after" else "改动前" }}</span> &middot;
+            <span title="{{ candidate.evidence }}">{{ candidate.evidence_label }}</span>
+            {% if candidate.truncated %}&middot; <span class="warn-marker">已截断</span>{% endif %}
+          </span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endfor %}
+  {% else %}
+  <p class="muted">第 {{ impact.page }} 页没有影响候选。</p>
+  {% endif %}
+  {% if impact.total_pages > 1 %}
+  <nav class="pager" aria-label="影响候选分页">
+    {% if impact.has_prev %}<a href="{{ impact.prev_url }}">&larr; 上一页</a>{% endif %}
+    {% if impact.show_first %}<a href="{{ impact.first_url }}">1</a><span class="meta">&hellip;</span>{% endif %}
+    {% for page in impact.pages %}
+      {% if page.active %}<span class="button disabled" aria-current="page">{{ page.number }}</span>{% else %}<a href="{{ page.url }}">{{ page.number }}</a>{% endif %}
+    {% endfor %}
+    {% if impact.show_last %}<span class="meta">&hellip;</span><a href="{{ impact.last_url }}">{{ impact.total_pages }}</a>{% endif %}
+    {% if impact.has_next %}<a href="{{ impact.next_url }}">下一页 &rarr;</a>{% endif %}
+  </nav>
+  {% endif %}
+</section>
+
+<section id="tests">
+  <h2>推荐测试 <span class="meta">当前第 {{ tests.page }} / {{ tests.total_pages }} 页，共 {{ tests.total }} 条建议</span></h2>
+  {% if tests_strong %}
+  <table class="grid">
+    <thead>
+      <tr><th>测试</th><th>强度</th><th class="num">距离</th><th>证据侧</th><th>新快照中存在</th><th>依据</th></tr>
+    </thead>
+    <tbody>
+    {% for test in tests_strong %}
+      <tr>
+        <td><code>{{ test.reference }}</code>{% if test.candidate_count %}<br><span class="meta">关联 {{ test.candidate_count }} 个候选</span>{% endif %}</td>
+        <td><span class="strength strength-{{ test.strength }}" title="{{ test.strength }}">{{ test.strength_label }}</span></td>
+        <td class="num">{{ test.min_depth }}</td>
+        <td title="{{ test.side }}">{{ test.side_label }}</td>
+        <td>{% if test.exists_in_after %}是{% else %}<span class="warn-marker">新快照中已不存在</span>{% endif %}</td>
+        <td>{% if test.evidence %}{{ test.evidence }}{% else %}-{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% if tests_weak %}
+  <details class="weak-tests">
+    <summary>弱关联测试（本页 {{ tests_weak|length }} 条）</summary>
+    <table class="grid compact">
+      <thead><tr><th>测试</th><th>强度</th><th>证据侧</th><th>新快照中存在</th><th>依据</th></tr></thead>
+      <tbody>
+      {% for test in tests_weak %}
+        <tr>
+          <td><code>{{ test.reference }}</code></td>
+          <td><span class="strength strength-{{ test.strength }}" title="{{ test.strength }}">{{ test.strength_label }}</span></td>
+          <td title="{{ test.side }}">{{ test.side_label }}</td>
+          <td>{% if test.exists_in_after %}是{% else %}<span class="warn-marker">新快照中已不存在</span>{% endif %}</td>
+          <td>{% if test.evidence %}{{ test.evidence }}{% else %}-{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
+  {% if not tests_strong and not tests_weak %}
+  <p class="muted">第 {{ tests.page }} 页没有推荐测试。</p>
+  {% endif %}
+  {% if tests.total_pages > 1 %}
+  <nav class="pager" aria-label="推荐测试分页">
+    {% if tests.has_prev %}<a href="{{ tests.prev_url }}">&larr; 上一页</a>{% endif %}
+    {% if tests.show_first %}<a href="{{ tests.first_url }}">1</a><span class="meta">&hellip;</span>{% endif %}
+    {% for page in tests.pages %}
+      {% if page.active %}<span class="button disabled" aria-current="page">{{ page.number }}</span>{% else %}<a href="{{ page.url }}">{{ page.number }}</a>{% endif %}
+    {% endfor %}
+    {% if tests.show_last %}<span class="meta">&hellip;</span><a href="{{ tests.last_url }}">{{ tests.total_pages }}</a>{% endif %}
+    {% if tests.has_next %}<a href="{{ tests.next_url }}">下一页 &rarr;</a>{% endif %}
+  </nav>
+  {% endif %}
+</section>
+
+<section id="diagnostics">
+  <h2>
+    诊断
+    <span class="meta">
+      错误 {{ coverage.error_count }} &middot; 警告 {{ coverage.warning_count }} &middot; 提示 {{ coverage.info_count }}
+    </span>
+  </h2>
+  {% if diagnostics %}
+  <details class="diagnostics">
+    <summary>展开诊断明细（{{ diagnostics|length }} 条）</summary>
+    <table class="grid compact">
+      <thead><tr><th>级别</th><th>代码</th><th>信息</th><th>位置</th><th>来源</th><th>详情</th></tr></thead>
+      <tbody>
+      {% for diagnostic in diagnostics %}
+        <tr>
+          <td><span class="severity severity-{{ diagnostic.severity }}" title="{{ diagnostic.severity }}">{{ diagnostic.severity_label }}</span></td>
+          <td><code>{{ diagnostic.code }}</code></td>
+          <td>{{ diagnostic.message }}</td>
+          <td>{% if diagnostic.path %}<code>{{ diagnostic.path }}</code>{% if diagnostic.line %}:{{ diagnostic.line }}{% endif %}{% else %}-{% endif %}</td>
+          <td class="meta">{{ diagnostic.source or "-" }}</td>
+          <td>{% if diagnostic.details_text %}<code class="details">{{ diagnostic.details_text }}</code>{% else %}-{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% else %}
+  <p class="muted">该 Run 没有诊断记录。</p>
+  {% endif %}
+</section>
+
+<section id="stages">
+  <h2>阶段耗时</h2>
+  {% if stage_errors %}
+  <div class="notice notice-warn">
+    失败的阶段：{% for name in stage_errors %}<code>{{ name }}</code>{% if not loop.last %}、{% endif %}{% endfor %}。之前阶段的证据已保留。
+  </div>
+  {% endif %}
+  {% if stages %}
+  <details class="stages">
+    <summary>展开阶段明细（{{ stages|length }} 个阶段）</summary>
+    <table class="grid compact">
+      <thead><tr><th>阶段</th><th class="num">耗时</th></tr></thead>
+      <tbody>
+      {% for stage in stages %}
+        <tr><td title="{{ stage.name }}">{{ stage.label }}</td><td class="num">{{ stage.duration_ms }} ms</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% else %}
+  <p class="muted">没有阶段耗时记录。</p>
+  {% endif %}
+</section>
+
+{% if symbol_changes_total %}
+<section id="symbol-changes">
+  <h2>符号变更 <span class="meta">共 {{ symbol_changes_total }} 条</span></h2>
+  <details class="symbol-changes">
+    <summary>展开符号变更表（{{ symbol_changes|length }} 条）</summary>
+    <table class="grid compact">
+      <thead>
+        <tr><th>符号变更</th><th>类型</th><th>原因</th><th>结构</th><th>证据侧</th><th>旧符号</th><th>新符号</th><th>变更行（旧 / 新）</th></tr>
+      </thead>
+      <tbody>
+      {% for symbol_change in symbol_changes %}
+        <tr>
+          <td><code>{{ symbol_change.symbol_change_id }}</code><br><span class="meta">所属变更 {{ symbol_change.change_id }}</span></td>
+          <td title="{{ symbol_change.kind }}">{{ symbol_change.kind_label }}</td>
+          <td title="{{ symbol_change.reason }}">{{ symbol_change.reason_label }}</td>
+          <td>{% if symbol_change.structure_changed %}<span class="warn-marker" title="changed">已变化</span>{% else %}<span title="text-only">仅文本</span>{% endif %}</td>
+          <td title="{{ symbol_change.side }}">{{ symbol_change.side_label }}</td>
+          <td>{% if symbol_change.old %}<code>{{ symbol_change.old.display_name }}</code><br><span class="meta">{{ symbol_change.old.path }}:{{ symbol_change.old.def_line }}</span>{% else %}-{% endif %}</td>
+          <td>{% if symbol_change.new %}<code>{{ symbol_change.new.display_name }}</code><br><span class="meta">{{ symbol_change.new.path }}:{{ symbol_change.new.def_line }}</span>{% else %}-{% endif %}</td>
+          <td>{{ symbol_change.old_changed_lines }} / {{ symbol_change.new_changed_lines }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if symbol_changes_omitted %}<p class="meta">另有 {{ symbol_changes_omitted }} 条符号变更未在页面展示（数据仍保存在数据库中）。</p>{% endif %}
+  </details>
+</section>
+{% endif %}
+
+{% if judge %}
+<section id="judge">
+  <h2>Judge 判定 <span class="meta" title="{{ judge.status }}">{{ judge.status_label }}</span></h2>
+  <div class="judge-summary">
+    <span class="chip" title="attempts">尝试 {{ judge.attempts_count }} 次</span>
+    <span class="chip" title="verdicts">判定 {{ judge.verdicts_count }} 条</span>
+    {% for item in judge.verdict_counts %}<span class="chip" title="{{ item.code }}">{{ item.label }} {{ item.count }}</span>{% endfor %}
+    {% if judge.unjudged %}<span class="chip" title="unjudged">未判定 {{ judge.unjudged }}</span>{% endif %}
+    {% if judge.cache_hits %}<span class="chip chip-cache" title="cache_hits">缓存命中 {{ judge.cache_hits }} 次</span>{% endif %}
+  </div>
+  <p class="meta">Judge 结论属于静态推断，仅供参考；下方明细按候选折叠展开，完整字段仍可通过本地 JSON API 查看。</p>
+  <details class="judge-details">
+    <summary>展开 Judge 明细（{{ judge.verdicts_shown }} / {{ judge.verdicts_count }} 条判定）</summary>
+    {% if judge.verdicts %}
+      {% for row in judge.verdicts %}
+      <article class="judge-card">
+        <h3>
+          候选 <code title="{{ row.candidate_id }}">{{ row.candidate_id }}</code>
+          <span class="verdict-chip verdict-{{ row.verdict }}" title="{{ row.verdict }}">{{ row.verdict_label }}</span>
+          {% if row.attempts and row.attempts[0].cache_hit %}<span class="chip chip-cache" title="cache_hit">缓存命中</span>{% endif %}
+        </h3>
+        <dl class="facts judge-facts">
+          <dt>理由</dt>
+          <dd>{% if row.reason %}{{ row.reason }}{% else %}-{% endif %}</dd>
+          <dt>适配器 / 模型</dt>
+          <dd>{{ row.adapter_label }}{% if row.model %} / <code>{{ row.model }}</code>{% else %} / -{% endif %}</dd>
+          <dt>尝试序号</dt>
+          <dd>#{{ row.attempt_no }}</dd>
+          <dt>证据位置</dt>
+          <dd>
+            {% if row.evidence %}
+            <ul class="evidence-list">
+              {% for evidence in row.evidence %}
+              <li>
+                <code>{{ evidence.path }}:{{ evidence.start_line }}-{{ evidence.end_line }}</code>
+                <span class="meta" title="{{ evidence.side }}">{{ evidence.side_label }}</span>
+                &middot; <span class="meta" title="{{ evidence.kind }}">{{ evidence.kind_label }}</span>
+              </li>
+              {% endfor %}
+            </ul>
+            {% else %}-{% endif %}
+          </dd>
+          <dt>条件</dt>
+          <dd>{% if row.conditions %}<ul class="evidence-list">{% for condition in row.conditions %}<li>{{ condition }}</li>{% endfor %}</ul>{% else %}-{% endif %}</dd>
+          <dt>不确定性</dt>
+          <dd>{% if row.uncertainty %}{{ row.uncertainty }}{% else %}-{% endif %}</dd>
+          <dt>尝试顺序</dt>
+          <dd>{{ row.attempt_sequence }}</dd>
+          {% if row.fallback_events %}
+          <dt>回退原因</dt>
+          <dd>{% for event in row.fallback_events %}<span class="chip chip-warn" title="{{ event.reason }}">#{{ event.attempt_no }} {{ event.label }}</span>{% endfor %}</dd>
+          {% endif %}
+        </dl>
+        {% if row.attempts %}
+        <details class="judge-attempts">
+          <summary>尝试明细（{{ row.attempts|length }} 次）</summary>
+          <table class="grid compact">
+            <thead><tr><th>序号</th><th>适配器</th><th>模型</th><th>有效</th><th>缓存</th><th>错误类别</th><th>回退原因</th><th class="num">耗时</th><th class="num">tokens 估算</th></tr></thead>
+            <tbody>
+            {% for attempt in row.attempts %}
+              <tr>
+                <td>#{{ attempt.attempt_no }}</td>
+                <td title="{{ attempt.adapter }}">{{ attempt.adapter_label }}</td>
+                <td>{% if attempt.model %}<code>{{ attempt.model }}</code>{% else %}-{% endif %}</td>
+                <td>{% if attempt.valid %}是{% else %}<span class="warn-marker">否</span>{% endif %}</td>
+                <td>{% if attempt.cache_hit %}<span class="chip chip-cache">命中</span>{% else %}-{% endif %}</td>
+                <td>{% if attempt.error_category %}<span title="{{ attempt.error_category }}">{{ attempt.error_label }}</span>{% else %}-{% endif %}</td>
+                <td>{% if attempt.fallback_reason %}<span title="{{ attempt.fallback_reason }}">{{ attempt.fallback_label }}</span>{% else %}-{% endif %}</td>
+                <td class="num">{{ attempt.duration_ms }} ms</td>
+                <td class="num">{{ attempt.context_tokens_estimate }}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </details>
+        {% endif %}
+      </article>
+      {% endfor %}
+      {% if judge.unjudged_attempts %}
+      <details class="judge-attempts">
+        <summary>未判定候选的尝试（{{ judge.unjudged_attempts|length }} 次）</summary>
+        <table class="grid compact">
+          <thead><tr><th>候选</th><th>序号</th><th>适配器</th><th>模型</th><th>有效</th><th>缓存</th><th>错误类别</th><th>回退原因</th><th class="num">耗时</th></tr></thead>
+          <tbody>
+          {% for attempt in judge.unjudged_attempts %}
+            <tr>
+              <td><code title="{{ attempt.candidate_id }}">{{ attempt.candidate_id }}</code></td>
+              <td>#{{ attempt.attempt_no }}</td>
+              <td title="{{ attempt.adapter }}">{{ attempt.adapter_label }}</td>
+              <td>{% if attempt.model %}<code>{{ attempt.model }}</code>{% else %}-{% endif %}</td>
+              <td>{% if attempt.valid %}是{% else %}<span class="warn-marker">否</span>{% endif %}</td>
+              <td>{% if attempt.cache_hit %}<span class="chip chip-cache">命中</span>{% else %}-{% endif %}</td>
+              <td>{% if attempt.error_category %}<span title="{{ attempt.error_category }}">{{ attempt.error_label }}</span>{% else %}-{% endif %}</td>
+              <td>{% if attempt.fallback_reason %}<span title="{{ attempt.fallback_reason }}">{{ attempt.fallback_label }}</span>{% else %}-{% endif %}</td>
+              <td class="num">{{ attempt.duration_ms }} ms</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </details>
+      {% endif %}
+    {% elif judge.verdict_counts %}
+    <table class="grid compact">
+      <thead><tr><th>判定</th><th class="num">数量</th></tr></thead>
+      <tbody>
+      {% for item in judge.verdict_counts %}
+        <tr><td title="{{ item.code }}">{{ item.label }}</td><td class="num">{{ item.count }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">没有 Judge 判定记录。</p>
+    {% endif %}
+  </details>
+</section>
+{% endif %}
+{% endblock %}

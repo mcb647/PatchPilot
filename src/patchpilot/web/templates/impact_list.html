@@ -1,0 +1,198 @@
+{# Server-rendered fallback for the impact graph: path tree + shortlist + evidence tables. #}
+{% macro legacy_node_label(node) -%}
+{% if node.symbol %}<code>{{ node.symbol.display_name }}</code>{% else %}<code>{{ node.symbol_id }}</code>{% endif %}
+<span class="meta">深度 {{ node.depth }}</span>
+{% if node.symbol %}<span class="meta">{{ node.symbol.path }}:{{ node.symbol.def_line }} &middot; {{ node.symbol.kind_label }} &middot; <span title="{{ node.symbol.side }}">{{ node.symbol.side_label }}</span></span>{% endif %}
+{% if node.via_edge %}
+<span class="meta">经由 <span title="{{ node.via_edge.edge_kind }}">{{ node.via_edge.edge_kind_label }}</span>
+  &middot; 调用点 <code>{{ node.via_edge.path }}:{{ node.via_edge.line }}</code>
+  &middot; <span class="resolution resolution-{{ node.via_edge.resolution }}" title="{{ node.via_edge.resolution }}">{{ node.via_edge.resolution_label }}</span>
+  {% if node.via_edge.reason %}<span class="meta" title="{{ node.via_edge.reason }}">（{{ node.via_edge.reason_label }}）</span>{% endif %}
+</span>
+{% endif %}
+{% if node.cycle %}<span class="cycle-ref" title="引用已显示节点 {{ node.reference_node_id }}">↺ 已显示</span>{% endif %}
+{%- endmacro %}
+
+{% macro legacy_render_node(node) -%}
+<li class="tree-node" id="node-{{ node.node_id }}" data-node-id="{{ node.node_id }}" data-depth="{{ node.depth }}" data-symbol="{{ node.symbol_id }}"{% if node.via_edge %} data-edge-kind="{{ node.via_edge.edge_kind }}"{% endif %}>
+  {% if node.children %}
+  <details{% if node.depth < 2 %} open{% endif %}>
+    <summary>{{ legacy_node_label(node) }}</summary>
+    <ul class="tree-children">
+      {% for child in node.children %}{{ legacy_render_node(child) }}{% endfor %}
+    </ul>
+  </details>
+  {% else %}
+  <div class="tree-leaf">{{ legacy_node_label(node) }}</div>
+  {% endif %}
+</li>
+{%- endmacro %}
+
+<section class="impact-legacy-tree" aria-label="路径树">
+  <h3>路径树（服务端渲染，无脚本可用）</h3>
+  <p class="meta">
+    从变更种子出发、沿调用/导入边展开的调用者树。循环引用折叠为「↺ 已显示」；
+    节点总数上限 {{ legacy.tree.node_limit }}。
+  </p>
+  {% if legacy.tree.truncated %}
+  <div class="notice notice-warn">
+    节点数达到上限 {{ legacy.tree.node_limit }}，树已截断{% if legacy.tree.dropped_candidates %}（{{ legacy.tree.dropped_candidates }} 个候选未展开）{% endif %}。
+    请使用种子 / 证据侧 / 边类型 / 深度筛选或提高节点上限缩小范围。
+  </div>
+  {% endif %}
+  <p class="meta">
+    共 {{ legacy.tree.counts.seeds }} 个种子 &middot; {{ legacy.tree.counts.nodes }} 个节点 &middot;
+    {{ legacy.tree.counts.edges }} 条边 &middot; {{ legacy.tree.counts.candidates }} 个候选
+    {% if legacy.filters.seed %}&middot; 种子筛选：<code>{{ legacy.filters.seed }}</code>{% endif %}
+    {% if legacy.filters.side %}&middot; 证据侧筛选：<span title="{{ legacy.filters.side }}">{{ legacy.filters.side }}</span>{% endif %}
+    {% if legacy.filters.kind %}&middot; 边类型筛选：<span title="{{ legacy.filters.kind }}">{{ legacy.filters.kind }}</span>{% endif %}
+    {% if legacy.filters.depth %}&middot; 最大深度：{{ legacy.filters.depth }}{% endif %}
+  </p>
+  {% if legacy.tree.seeds %}
+    {% for seed in legacy.tree.seeds %}
+    <section class="impact-seed" data-seed="{{ seed.symbol_change_id }}" data-side="{{ seed.side }}">
+      <h4>
+        种子
+        {% if seed.symbol %}<code>{{ seed.symbol.display_name }}</code>
+        <span class="meta">{{ seed.symbol.path }}:{{ seed.symbol.def_line }} &middot; {{ seed.symbol.kind_label }}</span>
+        {% else %}<code>{{ seed.seed_symbol_id }}</code>{% endif %}
+        <span class="chip" title="{{ seed.side }}">{{ seed.side_label }}</span>
+        <span class="meta">（{{ seed.side_label }}）{{ seed.candidate_count }} 个候选 &middot; <code>{{ seed.symbol_change_id }}</code></span>
+      </h4>
+      <ul class="tree">
+        {% for node in seed.roots %}{{ legacy_render_node(node) }}{% endfor %}
+      </ul>
+    </section>
+    {% endfor %}
+  {% else %}
+  <div class="empty">
+    <p>没有符合筛选条件的影响候选。</p>
+    <p><a href="/runs/{{ run.run_id }}/impact">清除筛选</a> 或返回 <a href="/runs/{{ run.run_id }}">Run 详情</a>。</p>
+  </div>
+  {% endif %}
+</section>
+
+<section class="impact-shortlist" aria-label="候选路径列表">
+  <h3>候选短链（与图中数据一致）</h3>
+  <p class="meta">
+    按种子分组，展示方向（调用者 → 被调用者）、位置、证据侧、解析状态；
+    与拓扑图使用同一 seed / side / kind / depth / max_nodes 筛选。
+  </p>
+  {% if shortlist %}
+    {% for group in shortlist %}
+    <div class="impact-seed" data-graph-seed="{{ group.symbol_change_id }}">
+      <h4>
+        <code>{{ group.seed_label }}</code>
+        <span class="meta">{{ group.seed_path }} &middot; {{ group.kind_label }} &middot; {{ group.candidate_count }} 个候选</span>
+        <span class="meta"><code>{{ group.symbol_change_id }}</code></span>
+      </h4>
+      {% for candidate in group.candidates %}
+      <details class="impact-candidate" data-candidate-id="{{ candidate.candidate_id }}">
+        <summary>
+          <code>{{ candidate.label }}</code>
+          <span class="meta">
+            深度 {{ candidate.min_depth }} &middot; {{ candidate.side_label }}
+            &middot; {{ candidate.tests|length }} 个相关测试
+            {% if candidate.truncated %}&middot; <span class="warn-marker">搜索已截断</span>{% endif %}
+            {% if candidate.missing_edges %}&middot; <span class="warn-marker">{{ candidate.missing_edges }} 条边未存储</span>{% endif %}
+          </span>
+        </summary>
+        <p class="meta">调用链：<code>{{ candidate.chain }}</code></p>
+        <p class="meta">候选 ID：<code>{{ candidate.candidate_id }}</code></p>
+        {% if candidate.edges %}
+        <table class="grid compact">
+          <thead><tr><th>方向</th><th>类型</th><th>证据侧</th><th>位置</th><th>解析状态</th></tr></thead>
+          <tbody>
+          {% for edge in candidate.edges %}
+            <tr>
+              <td><code>{{ edge.caller_label }} &rarr; {{ edge.callee_label }}</code></td>
+              <td title="{{ edge.edge_kind }}">{{ edge.edge_kind_label }}</td>
+              <td title="{{ edge.side }}">{{ edge.side_label }}</td>
+              <td><code>{{ edge.location }}</code></td>
+              <td>{{ edge.resolution_label }}{% if edge.reason %}<span class="meta" title="{{ edge.reason }}">（{{ edge.reason }}）</span>{% endif %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="muted">没有关联到已保存的边。</p>
+        {% endif %}
+        {% if candidate.tests %}
+        <p class="meta">相关测试：
+          {% for test in candidate.tests %}
+          <code>{{ test.test_path }}{% if test.qualified_name %}::{{ test.qualified_name }}{% endif %}</code>
+          <span class="meta" title="{{ test.strength }}">{{ test.strength }}</span>{% if not loop.last %}、{% endif %}
+          {% endfor %}
+        </p>
+        {% endif %}
+        {% if candidate.judge %}
+        <p class="meta">Judge 推断：
+          {% for verdict in candidate.judge %}
+          <span class="chip" title="{{ verdict.verdict }}">{{ verdict.verdict }}</span>
+          {{ verdict.reason }}{% if not loop.last %}；{% endif %}
+          {% endfor %}
+        </p>
+        {% endif %}
+      </details>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  {% else %}
+  <div class="empty"><p>没有符合筛选条件的影响候选。</p></div>
+  {% endif %}
+</section>
+
+<section class="impact-node-table" aria-label="节点证据表">
+  <h3>节点证据表</h3>
+  {% if node_rows %}
+  <table class="grid compact">
+    <thead><tr><th>符号</th><th>文件</th><th>行号</th><th>侧</th><th class="num">距离</th><th>类型</th><th class="num">候选</th><th>相关测试 / Judge</th></tr></thead>
+    <tbody>
+    {% for row in node_rows %}
+      <tr{% if row.node.missing %} class="missing-evidence"{% endif %}>
+        <td><code>{{ row.node.label }}</code>{% if row.node.missing %}<span class="warn-marker">（符号缺失）</span>{% endif %}<br><span class="meta"><code>{{ row.node.id }}</code></span></td>
+        <td>{% if row.node.path %}<code>{{ row.node.path }}</code>{% else %}-{% endif %}</td>
+        <td>{% if row.node.line %}{{ row.node.line }}{% else %}-{% endif %}</td>
+        <td title="{{ row.node.side }}">{{ row.node.side }}</td>
+        <td class="num">{{ row.node.depth }}</td>
+        <td>{{ row.node.kind }}</td>
+        <td class="num">{{ row.candidate_count }}</td>
+        <td>
+          {% if row.tests %}{{ row.tests|length }} 个测试{% else %}-{% endif %}
+          {% if row.judge %}&middot; Judge {{ row.judge|length }} 条{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">没有节点数据。</p>
+  {% endif %}
+</section>
+
+<section class="impact-edge-table" aria-label="边证据表">
+  <h3>边证据表</h3>
+  {% if edge_rows %}
+  <table class="grid compact">
+    <thead><tr><th>方向</th><th>类型</th><th>证据侧</th><th>位置集合</th><th>解析状态</th><th class="num">候选</th><th>相关测试 / Judge</th></tr></thead>
+    <tbody>
+    {% for row in edge_rows %}
+      <tr>
+        <td><code>{{ row.source_label }} &rarr; {{ row.target_label }}</code>{% if row.edge.cycle %}<span class="cycle-ref">↺ 回边</span>{% endif %}</td>
+        <td title="{{ row.edge.edge_kind }}">{{ row.edge_kind_label }}</td>
+        <td title="{{ row.edge.side }}">{{ row.side_label }}</td>
+        <td>{% for position in row.positions %}<code>{{ position }}</code>{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+        <td>{{ row.resolution_label }}{% if row.edge.reason %}<span class="meta" title="{{ row.edge.reason }}">（{{ row.edge.reason }}）</span>{% endif %}</td>
+        <td class="num">{{ row.candidate_count }}</td>
+        <td>
+          {% if row.tests %}{{ row.tests|length }} 个测试{% else %}-{% endif %}
+          {% if row.judge %}&middot; Judge {{ row.judge|length }} 条{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">没有边数据。</p>
+  {% endif %}
+</section>

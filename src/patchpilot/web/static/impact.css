@@ -1,0 +1,225 @@
+/* PatchPilot impact topology page — graph-specific styles.
+ *
+ * Reuses the shared typography/table/tree/filter styles from app.css and only
+ * adds what the Cytoscape canvas, toolbar, legend and evidence panel need.
+ */
+
+.impact-graph-section {
+  margin: 1rem 0 1.6rem;
+}
+
+.impact-filter-form .impact-seed-field { flex: 2 1 17rem; }
+.impact-filter-form .impact-advanced { flex-basis: 100%; }
+.impact-advanced > summary { cursor: pointer; color: var(--accent); }
+.impact-advanced-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.55rem;
+  padding-top: 0.5rem;
+}
+.impact-advanced-fields p { flex-basis: 100%; margin: 0; }
+.impact-intro { margin: 0.3rem 0; }
+
+.impact-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.4rem 0 0.6rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.impact-toolbar .button {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.impact-toolbar-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: #3b4652;
+}
+
+.impact-toolbar-filter select {
+  font: inherit;
+  padding: 0.2rem 0.3rem;
+}
+
+.impact-stats {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.impact-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  align-items: center;
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+}
+
+.impact-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.edge-sample {
+  display: inline-block;
+  width: 1.7rem;
+  border-top-width: 3px;
+  border-top-style: solid;
+}
+
+.edge-call { border-top-color: #3f6fd1; border-top-style: solid; }
+.edge-import { border-top-color: #7a5bb5; border-top-style: dashed; }
+.edge-global_read { border-top-color: #b5762a; border-top-style: dotted; }
+.edge-cycle { border-top-color: #b23b3b; border-top-style: dashed; }
+
+.node-sample {
+  display: inline-block;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+.node-seed { background: #f4c542; }
+.node-before { background: #e9edf3; }
+.node-after { background: #d8e9ff; }
+
+.impact-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 21rem;
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.impact-graph {
+  height: clamp(22rem, 50vh, 34rem);
+  background: linear-gradient(180deg, #fbfcfe 0%, #f4f7fb 100%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+}
+
+.impact-graph:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.impact-evidence {
+  min-height: 8rem;
+  max-height: 34rem;
+  overflow: auto;
+  padding: 0.7rem 0.85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.86rem;
+}
+
+.impact-evidence h3 {
+  margin: 0.1rem 0 0.45rem;
+  font-size: 1rem;
+}
+
+.impact-evidence dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.7rem;
+  margin: 0;
+}
+
+.impact-evidence dt {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.impact-evidence dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.impact-evidence .evidence-section {
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.evidence-list {
+  margin: 0.15rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.impact-candidate {
+  margin: 0.35rem 0;
+}
+
+.impact-candidate > summary {
+  cursor: pointer;
+}
+
+.impact-shortlist,
+.impact-node-table,
+.impact-edge-table,
+.impact-legacy-tree {
+  margin: 1rem 0;
+}
+
+.impact-list-section > h3 {
+  margin: 1rem 0 0.3rem;
+}
+
+.missing-evidence {
+  background: #fff6f6;
+}
+
+.impact-seed-info {
+  margin: 0.4rem 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .impact-toolbar {
+    row-gap: 0.35rem;
+  }
+
+  .impact-stats {
+    margin-left: 0;
+    flex-basis: 100%;
+  }
+
+  .impact-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Narrow screens: the evidence panel moves below the canvas. */
+  .impact-evidence {
+    order: 2;
+    max-height: none;
+  }
+
+  .impact-graph {
+    height: 22rem;
+    min-height: 16rem;
+  }
+
+  .impact-legend {
+    gap: 0.3rem 0.6rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .impact-graph {
+    background: #fbfcfe;
+  }
+}

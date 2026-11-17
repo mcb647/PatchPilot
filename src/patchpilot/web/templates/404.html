@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}未找到 &middot; PatchPilot{% endblock %}
+{% block content %}
+<h1>未找到</h1>
+<div class="notice notice-error">{{ message }}</div>
+<p>请求的页面或 Run 不存在于该历史数据库中。</p>
+<p><a class="button" href="/">返回分析历史</a></p>
+{% endblock %}

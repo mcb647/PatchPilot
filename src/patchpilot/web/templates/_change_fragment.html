@@ -1,0 +1,21 @@
+<div class="change-fragment" data-change-id="{{ change_id }}">
+  <p class="meta">
+    状态：<span title="{{ change.analysis_status }}">{{ analysis_status_label }}</span>
+    {% if rename_basis %}&middot; 重命名依据：{{ rename_basis }}{% endif %}
+    &middot; 变更行：旧侧 {{ old_changed_lines }}，新侧 {{ new_changed_lines }}
+    {% if diff_truncated %}&middot; <span class="warn-marker" title="diff evidence truncated">差异证据已截断</span>{% endif %}
+    {% if symbol_change_count %}&middot; 关联符号变更 {{ symbol_change_count }} 条{% endif %}
+  </p>
+  {% if hunks %}
+  <pre class="diff">{% for hunk in hunks %}<span class="hunk">{{ hunk.header }}</span>
+{% for line in hunk.lines %}<span class="diff-line diff-{{ line.kind }}">{{ line.text }}</span>
+{% endfor %}{% endfor %}</pre>
+  {% include "_hunk_pagination.html" %}
+  {% elif change.analysis_status != "analyzed" %}
+  <p class="muted">该文件未进行分析（非 Python 文件或分析被跳过），没有行差异。</p>
+  {% elif not has_hunks %}
+  <p class="muted">该变更未保留 hunk 文本（证据被截断，或使用了 metadata-only 存储）。</p>
+  {% else %}
+  <p class="muted">该变更没有行差异。</p>
+  {% endif %}
+</div>

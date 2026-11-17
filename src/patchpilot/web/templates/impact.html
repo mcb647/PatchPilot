@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}影响拓扑图 &middot; {{ run.run_id }} &middot; PatchPilot{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="/static/impact.css">
+{% if view == "graph" %}
+<script src="/static/vendor/cytoscape.min.js" defer></script>
+<script src="/static/impact-graph.js" defer></script>
+{% endif %}
+{% endblock %}
+{% block content %}
+<p class="breadcrumb"><a href="/runs/{{ run.run_id }}">&larr; 返回分析结果</a></p>
+<h1>代码影响关系</h1>
+<p class="impact-intro">{% if view == "graph" %}点击连线，查看哪段代码依赖这处改动，以及它所在的文件和行号。{% else %}展开一条路径，查看改动位置和关联代码。{% endif %}</p>
+
+{% if selected_seed_entry %}
+<p class="meta impact-seed-info">
+  <strong>当前改动：</strong><code>{{ selected_seed_entry.display_name }}</code>
+  &middot; {{ "改动后" if selected_side == "after" else "改动前" if selected_side == "before" else "所有已保存证据" }}
+</p>
+{% endif %}
+
+<form class="filter-form impact-filter-form" method="get" action="/runs/{{ run.run_id }}/impact">
+  <label class="impact-seed-field">切换改动位置
+    <select name="seed">
+      <option value="">{{ "自动选择改动位置" if view == "graph" else "全部改动位置" }}</option>
+      {% for entry in seed_entries %}
+      <option value="{{ entry.symbol_change_id }}"{% if filters.seed == entry.symbol_change_id %} selected{% endif %}>{{ entry.display_name }}{% if entry.path %} · {{ entry.path }}{% endif %} · {{ entry.candidate_count }} 条线索</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>查看改动前后
+    <select name="side">
+      <option value="">{{ "自动选择" if view == "graph" else "改动前和改动后" }}</option>
+      {% for option in side_options %}
+      <option value="{{ option.value }}"{% if filters.side == option.value %} selected{% endif %}>{{ "改动前" if option.value == "before" else "改动后" }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit" class="button">查看所选关系</button>
+  {% if view == "graph" %}
+  <a class="button" href="{{ view_switch_url }}">切换到列表视图</a>
+  {% else %}
+  <a class="button" href="{{ view_switch_url }}">切换到拓扑图</a>
+  {% endif %}
+  <input type="hidden" name="view" value="{{ view }}">
+  <details class="impact-advanced"{% if filters.kind or filters.depth %} open{% endif %}>
+    <summary>更多筛选</summary>
+    <div class="impact-advanced-fields">
+      {% if depth_defaulted %}<p class="meta">图默认显示两层关系，最多 {{ graph.limits.max_nodes }} 个节点。</p>{% endif %}
+      <label>关系类型
+        <select name="kind">
+          <option value="">全部</option>
+          {% for option in kind_options %}
+          <option value="{{ option.value }}"{% if filters.kind == option.value %} selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>最多追踪几层
+        <input type="number" name="depth" min="1" max="{{ max_depth }}" value="{{ filters.depth }}" placeholder="全部">
+      </label>
+      <label>最多显示几处代码
+        <input type="number" name="max_nodes" min="1" max="200" value="{{ filters.max_nodes }}">
+      </label>
+      {% if has_filters %}<a class="button" href="/runs/{{ run.run_id }}/impact">清除筛选</a>{% endif %}
+    </div>
+  </details>
+</form>
+
+{% if only_before %}
+<div class="notice notice-warn">
+  默认种子在新快照中没有可定位的符号/路径，只能选择旧侧证据；画布展示的是「仅旧侧证据」的调用链。
+</div>
+{% endif %}
+{% if analysis_truncated %}
+<div class="notice notice-warn">
+  分析时已达到影响搜索上限：部分候选/路径本身不完整（数据库中的候选带 truncated 标记），下图和列表都只反映已保存的部分。
+</div>
+{% endif %}
+{% if view_limit_truncated %}
+<div class="notice notice-warn">
+  当前视图节点数达到上限 {{ graph.limits.max_nodes }}，只显示部分节点与边；
+  可提高节点上限、切换种子或使用侧/边类型/深度筛选缩小范围。
+</div>
+{% endif %}
+
+{% if view == "graph" %}
+<noscript><style>#impact-graph-section{display:none}</style></noscript>
+<section id="impact-graph-section" class="impact-graph-section">
+  <div class="impact-toolbar" role="toolbar" aria-label="影响图工具栏">
+    <button type="button" class="button" data-action="zoom-in" aria-label="放大">＋</button>
+    <button type="button" class="button" data-action="zoom-out" aria-label="缩小">－</button>
+    <button type="button" class="button" data-action="fit" aria-label="适应窗口">适应窗口</button>
+    <button type="button" class="button" data-action="reset" aria-label="重置视图">重置</button>
+    <label class="impact-toolbar-filter">深度
+      <select id="graph-depth-filter" aria-label="按深度隐藏更远的节点">
+        <option value="">全部深度</option>
+      </select>
+    </label>
+    <label class="impact-toolbar-filter">边类型
+      <select id="graph-kind-filter" aria-label="按边类型筛选">
+        <option value="">全部类型</option>
+        {% for option in kind_options %}
+        <option value="{{ option.value }}">{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="button" class="button" data-action="filters-reset" aria-label="清除图内筛选">清除图内筛选</button>
+    <span class="impact-stats" id="impact-graph-stats">
+      {{ graph.stats.nodes }} 处代码 &middot; {{ graph.stats.edges }} 条关系
+      &middot; 直接关联 {{ graph.stats.direct }} &middot; 间接关联 {{ graph.stats.indirect }}
+    </span>
+  </div>
+  <p class="impact-legend" aria-label="图例">
+    <span class="impact-legend-item"><span class="edge-sample edge-call" aria-hidden="true"></span>调用</span>
+    <span class="impact-legend-item"><span class="edge-sample edge-import" aria-hidden="true"></span>导入</span>
+    <span class="impact-legend-item"><span class="edge-sample edge-global_read" aria-hidden="true"></span>全局读取</span>
+    <span class="impact-legend-item"><span class="node-sample node-seed" aria-hidden="true"></span>改动位置</span>
+    {% if graph.edges|selectattr("cycle")|list %}
+    <span class="impact-legend-item"><span class="edge-sample edge-cycle" aria-hidden="true"></span>回到已显示的代码（回边）</span>
+    {% endif %}
+    <span class="meta">箭头指向被调用、被导入或被读取的代码。</span>
+  </p>
+  <div id="impact-filter-notice" class="notice notice-info" hidden></div>
+  <div class="impact-layout">
+    <div id="impact-graph" class="impact-graph" tabindex="0" role="application"
+         aria-label="影响关系拓扑图（可键盘缩放/适应窗口；也可使用下方路径列表）"
+         data-graph="{{ graph_json }}"
+         data-max-nodes="{{ graph.limits.max_nodes }}"
+         data-node-count="{{ graph.stats.nodes }}"
+         data-edge-count="{{ graph.stats.edges }}">
+      加载拓扑图失败时，请使用下方路径列表与证据表。
+    </div>
+    <aside id="impact-evidence" class="impact-evidence" aria-live="polite" aria-label="证据面板">
+      <p class="meta">点击图中的代码或连线，查看为什么会出现在这里。</p>
+    </aside>
+  </div>
+</section>
+{% else %}
+<div class="notice notice-info">
+  当前为路径列表视图（无脚本友好）。<a href="{{ view_switch_url }}">切换到拓扑图</a>。
+</div>
+{% endif %}
+
+<section id="impact-list" class="impact-list-section">
+  <h2>路径列表与证据</h2>
+  {% include "impact_list.html" %}
+</section>
+{% endblock %}

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}{{ display_path }} &middot; Run {{ run.run_id }} &middot; PatchPilot{% endblock %}
+{% block content %}
+<p class="breadcrumb"><a href="/runs/{{ run.run_id }}">&larr; 返回 Run {{ run.run_id }}</a></p>
+<h1><code>{{ display_path }}</code></h1>
+
+<p class="badges">
+  <span class="chip" title="{{ change.kind }}">{{ kind_label }}</span>
+  <span class="chip" title="{{ change.analysis_status }}">{{ analysis_status_label }}</span>
+  {% if rename_basis %}<span class="chip" title="rename_basis">重命名依据：{{ rename_basis }}</span>{% endif %}
+  {% if diff_truncated %}<span class="chip chip-warn" title="diff evidence truncated">差异证据已截断</span>{% endif %}
+</p>
+
+<dl class="facts">
+  <dt>Run</dt>
+  <dd><a href="/runs/{{ run.run_id }}"><code>{{ run.run_id }}</code></a></dd>
+  <dt>仓库</dt>
+  <dd>{{ run.display_name }}{% if run.repo_root %} <code class="path">{{ run.repo_root }}</code>{% endif %}</dd>
+  <dt>比较端点</dt>
+  <dd><code>{{ run.endpoint_before }}</code> &rarr; <code>{{ run.endpoint_after }}</code></dd>
+  <dt>旧路径</dt>
+  <dd>{% if change.old_path %}<code>{{ change.old_path }}</code>{% else %}-{% endif %}</dd>
+  <dt>新路径</dt>
+  <dd>{% if change.new_path %}<code>{{ change.new_path }}</code>{% else %}-{% endif %}</dd>
+  <dt>变更行数</dt>
+  <dd>旧侧 {{ old_changed_lines }} 行，新侧 {{ new_changed_lines }} 行</dd>
+  <dt>关联符号变更</dt>
+  <dd>{{ symbol_change_count }} 条</dd>
+</dl>
+
+{% if change_diagnostics %}
+<details class="change-diagnostics">
+  <summary>展开该文件的诊断（{{ change_diagnostics|length }} 条）</summary>
+  <table class="grid compact">
+    <thead><tr><th>级别</th><th>代码</th><th>信息</th><th>位置</th></tr></thead>
+    <tbody>
+    {% for diagnostic in change_diagnostics %}
+      <tr>
+        <td><span class="severity severity-{{ diagnostic.severity }}" title="{{ diagnostic.severity }}">{{ diagnostic.severity_label }}</span></td>
+        <td><code>{{ diagnostic.code }}</code></td>
+        <td>{{ diagnostic.message }}</td>
+        <td>{% if diagnostic.path %}<code>{{ diagnostic.path }}</code>{% if diagnostic.line %}:{{ diagnostic.line }}{% endif %}{% else %}-{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</details>
+{% endif %}
+
+<section>
+  <h2>差异</h2>
+  {% include "_change_fragment.html" %}
+</section>
+{% endblock %}

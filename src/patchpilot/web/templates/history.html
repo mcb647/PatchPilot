@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}分析历史 &middot; PatchPilot{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>分析历史</h1>
+  {% if new_analysis_href %}
+  <a class="button button-primary" href="{{ new_analysis_href }}">新建分析</a>
+  {% else %}
+  <span class="meta" title="未从仓库启动 Web，无法直接提交任务">新建分析：请在仓库中运行 <code>patchpilot analyze</code></span>
+  {% endif %}
+</div>
+{% if repo_id %}
+<p class="meta">仅显示当前工作区记录的分析。</p>
+{% endif %}
+
+<form class="filter-bar" method="get" action="/" role="search" aria-label="历史筛选">
+  <label>状态
+    <select name="status">
+      <option value="">全部状态</option>
+      {% for option in status_options %}
+      <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>模式
+    <select name="mode">
+      <option value="">全部模式</option>
+      {% for option in mode_options %}
+      <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>分支
+    <input type="text" name="branch" value="{{ filters.branch or '' }}" maxlength="200" placeholder="完整分支名，如 feature/x">
+  </label>
+  <button class="button" type="submit">筛选</button>
+  {% if has_filters %}<a class="button" href="{{ clear_href }}">清除筛选</a>{% endif %}
+</form>
+
+{% if has_filters %}
+<div class="filter-chips" aria-label="当前筛选">
+  <span class="meta">当前筛选：</span>
+  {% for chip in filter_chips %}
+  <span class="chip" title="{{ chip.key }}={{ chip.value }}">
+    {{ chip.label }}：{{ chip.value_label }}
+    <a class="chip-remove" href="{{ chip.remove_href }}" aria-label="移除{{ chip.label }}筛选">×</a>
+  </span>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if read_error %}
+<div class="notice notice-error">{{ read_error }}</div>
+{% endif %}
+
+{% if runs %}
+<div class="table-scroll">
+<table class="grid history-table">
+  <thead>
+    <tr>
+      <th>时间</th>
+      <th>分支 / 模式</th>
+      <th>状态</th>
+      <th class="num">文件</th>
+      <th class="num">影响线索</th>
+      <th>分析结果</th>
+      <th>详情</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for run in runs %}
+    <tr data-run-id="{{ run.run_id }}" data-run-status="{{ run.status }}">
+      <td data-label="时间" class="nowrap">
+        <time datetime="{{ run.started_time.iso or '' }}" title="{{ run.started_time.title or '' }}">{{ run.started_time.text }}</time>
+      </td>
+      <td data-label="分支 / 模式">
+        <span class="branch" title="{{ run.branch_title }}">{{ run.branch_label }}</span><br>
+        <span class="meta" title="{{ run.mode }}">{{ run.mode_label }}</span>
+      </td>
+      <td data-label="状态">
+        <span class="status status-{{ run.status }}" title="{{ run.status_title }}"><span class="status-symbol" aria-hidden="true">{{ run.status_symbol }}</span>{{ run.status_label }}</span>
+      </td>
+      <td data-label="文件" class="num">
+        {{ run.counts.changes }}
+        <span class="meta">变更</span>
+      </td>
+      <td data-label="影响线索" class="num">{{ run.counts.candidates }}</td>
+      <td data-label="分析结果" title="{{ run.summary_title }}">{{ "有待核对的关联代码" if run.summary == "candidates_found" else run.summary_label }}</td>
+      <td data-label="详情" class="run-cell">
+        <a class="run-link" href="/runs/{{ run.run_id }}">查看详情</a>
+        <div class="run-id" title="{{ run.run_id }}">{{ run.run_id }}</div>
+        <div class="meta">
+          {{ run.display_name }}
+          {% if run.task_id %}&middot; 任务 <a href="/tasks/{{ run.task_id }}">{{ run.task_id }}</a>{% endif %}
+        </div>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<div class="pager">
+  <span class="pager-info">第 {{ shown_from }}-{{ shown_to }} 条 &middot; 共 {{ total }} 条 &middot; 第 {{ page }} / {{ total_pages }} 页</span>
+  {% if has_prev %}
+  <a class="button" href="{{ prev_href }}">上一页</a>
+  {% else %}
+  <span class="button disabled">上一页</span>
+  {% endif %}
+  {% if has_next %}
+  <a class="button" href="{{ next_href }}">下一页</a>
+  {% else %}
+  <span class="button disabled">下一页</span>
+  {% endif %}
+</div>
+{% elif has_filters %}
+<div class="empty">
+  <p>没有符合当前筛选条件的分析记录。</p>
+  <p><a href="{{ clear_href }}">清除筛选</a> 后查看全部历史。</p>
+</div>
+{% elif page > 1 and total > 0 %}
+<div class="empty">
+  <p>本页没有分析记录。</p>
+  <p><a href="{{ first_href }}">返回第一页</a></p>
+</div>
+<div class="pager">
+  <span class="pager-info">共 {{ total }} 条 &middot; 第 {{ page }} / {{ total_pages }} 页</span>
+  <a class="button" href="{{ prev_href }}">上一页</a>
+  <span class="button disabled">下一页</span>
+</div>
+{% else %}
+<div class="empty">
+  <p>尚未记录任何分析{% if not db_exists %} &mdash; 历史数据库尚未创建{% endif %}。</p>
+  <p>在仓库中运行 <code>patchpilot analyze</code> 记录第一次分析，然后刷新本页。</p>
+</div>
+{% endif %}
+
+{% if not db_exists %}
+<p class="meta">历史数据库：<code>{{ db_path }}</code>（尚未创建）</p>
+{% endif %}
+{% endblock %}

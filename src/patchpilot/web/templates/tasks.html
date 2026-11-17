@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}分析任务 &middot; PatchPilot{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>分析任务</h1>
+  <a class="button button-primary" href="/tasks/new">新建分析任务</a>
+</div>
+
+{% if notice %}<div class="notice notice-warn">{{ notice }}</div>{% endif %}
+
+<p class="meta">
+  后台 worker：
+  {% if worker_enabled %}
+    已启用{% if worker_running %}（运行中）{% endif %}
+    {% if worker_error %}；启动失败：{{ worker_error }}{% endif %}
+    {% if worker_heartbeat %}；运行中任务最近心跳：<time datetime="{{ worker_heartbeat.iso or '' }}" title="{{ worker_heartbeat.title or '' }}">{{ worker_heartbeat.text }}</time>{% endif %}
+  {% else %}
+    未启用（本页面只负责排队；任务由已启动的 worker 执行）
+  {% endif %}
+</p>
+
+<form class="filter-bar" method="get" action="/tasks" role="search" aria-label="任务筛选">
+  <label>任务分组
+    <select name="group">
+      <option value="">全部任务</option>
+      {% for option in group_options %}
+      <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button class="button" type="submit">筛选</button>
+  {% if has_filters %}<a class="button" href="{{ clear_href }}">清除筛选</a>{% endif %}
+</form>
+
+{% if has_filters %}
+<div class="filter-chips" aria-label="当前筛选">
+  <span class="meta">当前筛选：</span>
+  <span class="chip">分组：{{ group_label }} <a class="chip-remove" href="{{ clear_href }}" aria-label="移除分组筛选">×</a></span>
+</div>
+{% endif %}
+
+{% if tasks %}
+<div class="table-scroll">
+<table class="grid tasks-table">
+  <thead>
+    <tr>
+      <th>任务</th>
+      <th>状态</th>
+      <th>当前阶段</th>
+      <th>耗时</th>
+      <th>更新时间</th>
+      <th>心跳</th>
+      <th>Run / 操作</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for task in tasks %}
+    <tr data-task-id="{{ task.task_id }}" data-task-status="{{ task.status }}" data-task-group="{{ task.group }}">
+      <td data-label="任务">
+        <a class="run-link" href="/tasks/{{ task.task_id }}">{{ task.task_id }}</a><br>
+        <span class="meta">{{ task.params_summary }}</span>
+      </td>
+      <td data-label="状态">
+        <span class="status {{ task.status_class }}" title="{{ task.status }}"><span class="status-symbol" aria-hidden="true">{{ task.status_symbol }}</span>{{ task.status_label }}</span>
+      </td>
+      <td data-label="当前阶段">
+        {% if task.current_stage %}
+        <span class="task-current-stage">{{ task.current_stage.stage_label }}</span>
+        <span class="task-stage-status task-stage-{{ task.current_stage.status }}">{{ task.current_stage.status_label }}</span>
+        {% elif task.group == "queued" %}
+        <span class="muted">等待 worker 领取</span>
+        {% else %}
+        <span class="muted">-</span>
+        {% endif %}
+      </td>
+      <td data-label="耗时">{{ task.duration_text }}</td>
+      <td data-label="更新时间" class="nowrap">
+        <time datetime="{{ task.updated_time.iso or '' }}" title="{{ task.updated_time.title or '' }}">{{ task.updated_time.text }}</time>
+      </td>
+      <td data-label="心跳" class="nowrap">
+        {% if task.heartbeat_time.valid %}
+        <time datetime="{{ task.heartbeat_time.iso or '' }}" title="{{ task.heartbeat_time.title or '' }}">{{ task.heartbeat_time.text }}</time>
+        {% else %}<span class="muted">-</span>{% endif %}
+      </td>
+      <td data-label="Run / 操作" class="actions">
+        {% if task.run_href %}<a class="button button-small" href="{{ task.run_href }}">查看 Run</a>{% endif %}
+        {% if task.can_cancel %}
+        <form method="post" action="/tasks/{{ task.task_id }}/cancel" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="button button-small" type="submit">取消</button>
+        </form>
+        {% endif %}
+        {% if task.can_retry %}
+        <form method="post" action="/tasks/{{ task.task_id }}/retry" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="button button-small" type="submit">重试</button>
+        </form>
+        {% endif %}
+        {% if not task.run_href and not task.can_cancel and not task.can_retry %}<span class="muted">-</span>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<div class="pager">
+  <span class="pager-info">第 {{ shown_from }}-{{ shown_to }} 条 &middot; 共 {{ total }} 条 &middot; 第 {{ page }} / {{ total_pages }} 页</span>
+  {% if has_prev %}<a class="button" href="{{ prev_href }}">上一页</a>{% else %}<span class="button disabled">上一页</span>{% endif %}
+  {% if has_next %}<a class="button" href="{{ next_href }}">下一页</a>{% else %}<span class="button disabled">下一页</span>{% endif %}
+</div>
+{% elif has_filters %}
+<div class="empty">
+  <p>没有符合当前筛选条件的分析任务。</p>
+  <p><a href="{{ clear_href }}">清除筛选</a> 后查看全部任务。</p>
+</div>
+{% else %}
+<div class="empty">
+  <p>还没有分析任务。</p>
+  <p>点击“新建分析任务”提交第一个任务，任务由后台 worker 执行。</p>
+</div>
+{% endif %}
+{% endblock %}

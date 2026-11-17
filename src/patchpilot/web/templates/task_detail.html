@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block head_extra %}
+{% if task.is_active %}<meta http-equiv="refresh" content="{{ poll_seconds }}">{% endif %}
+{% endblock %}
+{% block title %}任务 {{ task.task_id }} &middot; PatchPilot{% endblock %}
+{% block content %}
+<p class="breadcrumb"><a href="/tasks">&larr; 任务列表</a></p>
+<div class="page-head">
+  <h1>任务 <code class="task-id">{{ task.task_id }}</code></h1>
+  <span class="status {{ task.status_class }}" title="{{ task.status }}"><span class="status-symbol" aria-hidden="true">{{ task.status_symbol }}</span>{{ task.status_label }}</span>
+</div>
+
+{% if notice %}<div class="notice notice-warn">{{ notice }}</div>{% endif %}
+
+<section class="task-summary" aria-label="任务摘要">
+  <dl class="facts">
+    <dt>当前阶段</dt>
+    <dd>
+      {% if task.current_stage %}
+      <code>{{ task.current_stage.stage_label }}</code>
+      <span class="task-stage-status task-stage-{{ task.current_stage.status }}">{{ task.current_stage.status_label }}</span>
+      {% if task.current_stage.time.valid %}<span class="meta">{{ task.current_stage.time.text }}</span>{% endif %}
+      {% elif task.group == "queued" %}
+      <span class="muted">等待 worker 领取</span>
+      {% else %}<span class="muted">-</span>{% endif %}
+    </dd>
+    <dt>已耗时</dt>
+    <dd>{{ task.duration_text }}{% if task.duration.active %}<span class="meta">（仍在运行）</span>{% endif %}</dd>
+    <dt>更新时间</dt>
+    <dd><time datetime="{{ task.updated_time.iso or '' }}" title="{{ task.updated_time.title or '' }}">{{ task.updated_time.text }}</time></dd>
+    <dt>比较模式</dt>
+    <dd title="{{ task.mode }}">{{ task.mode_label }}</dd>
+    <dt>Judge</dt>
+    <dd>{{ "开启（仅发送裁剪后的证据）" if task.judge else "关闭" }}</dd>
+    <dt>错误类别</dt>
+    <dd>{% if task.error_code %}<code class="error-code">{{ task.error_code }}</code>{% else %}<span class="muted">-</span>{% endif %}</dd>
+    <dt>Run</dt>
+    <dd>
+      {% if task.run_href %}
+      <a class="button button-small" href="{{ task.run_href }}">查看 Run</a>
+      {% else %}<span class="muted">尚未生成</span>{% endif %}
+    </dd>
+  </dl>
+
+  {% if task.failure_reason or task.failure_message %}
+  <div class="notice notice-error" role="alert">
+    <strong>失败原因：</strong>
+    {% if task.failure_message %}<span>{{ task.failure_message }}</span>{% else %}<code>{{ task.failure_reason }}</code>{% endif %}
+  </div>
+  {% endif %}
+
+  <div class="form-actions">
+    {% if task.can_cancel %}
+    <form method="post" action="/tasks/{{ task.task_id }}/cancel" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="button" type="submit">取消排队中的任务</button>
+    </form>
+    {% endif %}
+    {% if task.can_retry %}
+    <form method="post" action="/tasks/{{ task.task_id }}/retry" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="button" type="submit">以相同参数重试</button>
+    </form>
+    {% endif %}
+    {% if task.is_active %}
+    <span class="meta">任务尚未结束，本页每 {{ poll_seconds }} 秒自动刷新；也可访问 <a href="/tasks/{{ task.task_id }}/progress">进度片段</a>。</span>
+    {% else %}
+    <span class="meta">任务已结束，页面不再刷新。进度片段：<a href="/tasks/{{ task.task_id }}/progress">/tasks/{{ task.task_id }}/progress</a></span>
+    {% endif %}
+  </div>
+</section>
+
+<details class="task-details">
+  <summary>诊断与详情（阶段事件、参数快照、心跳、worker 信息）</summary>
+
+  <h3>阶段事件</h3>
+  {% if task.stages %}
+  <table class="grid compact">
+    <thead><tr><th>阶段</th><th>事件</th><th class="num">耗时</th><th>时间</th></tr></thead>
+    <tbody>
+    {% for stage in task.stages %}
+      <tr>
+        <td><code>{{ stage.stage_label }}</code></td>
+        <td><span class="task-stage-status task-stage-{{ stage.status }}">{{ stage.status_label }}</span></td>
+        <td class="num">{% if stage.duration_text %}{{ stage.duration_text }}{% else %}-{% endif %}</td>
+        <td class="nowrap">
+          {% if stage.time.valid %}<time datetime="{{ stage.time.iso or '' }}" title="{{ stage.time.title or '' }}">{{ stage.time.text }}</time>{% else %}-{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">尚无阶段事件。</p>
+  {% endif %}
+
+  <h3>参数快照</h3>
+  <dl class="facts">
+    <dt>仓库根目录</dt>
+    <dd><code class="path">{{ task.repo_root }}</code></dd>
+    <dt>比较模式</dt>
+    <dd title="{{ task.mode }}">{{ task.mode_label }}</dd>
+    {% if task.base_ref %}<dt>base 引用</dt><dd><code>{{ task.base_ref }}</code></dd>{% endif %}
+    {% if task.commit_ref %}<dt>commit 引用</dt><dd><code>{{ task.commit_ref }}</code></dd>{% endif %}
+    {% if task.range_spec %}<dt>提交区间</dt><dd><code>{{ task.range_spec }}</code></dd>{% endif %}
+    {% if task.parent_index is not none %}<dt>父提交序号</dt><dd>{{ task.parent_index }}</dd>{% endif %}
+    <dt>包含未跟踪文件</dt><dd>{{ "是" if task.include_untracked else "否" }}</dd>
+    <dt>Judge</dt><dd>{{ "开启（发送裁剪后的证据到已配置适配器）" if task.judge else "关闭" }}</dd>
+    <dt>配置摘要</dt><dd><code>{{ task.config_digest or "-" }}</code></dd>
+    <dt>幂等键</dt><dd>{% if task.task_key %}<code>{{ task.task_key }}</code>{% else %}-{% endif %}</dd>
+  </dl>
+
+  <h3>心跳与 worker</h3>
+  <dl class="facts">
+    <dt>创建时间</dt>
+    <dd><time datetime="{{ task.created_time.iso or '' }}" title="{{ task.created_time.title or '' }}">{{ task.created_time.text }}</time></dd>
+    <dt>开始时间</dt>
+    <dd>{% if task.started_time.valid %}<time datetime="{{ task.started_time.iso or '' }}" title="{{ task.started_time.title or '' }}">{{ task.started_time.text }}</time>{% else %}-{% endif %}</dd>
+    <dt>结束时间</dt>
+    <dd>{% if task.finished_time.valid %}<time datetime="{{ task.finished_time.iso or '' }}" title="{{ task.finished_time.title or '' }}">{{ task.finished_time.text }}</time>{% else %}-{% endif %}</dd>
+    <dt>worker 心跳</dt>
+    <dd>{% if task.heartbeat_time.valid %}<time datetime="{{ task.heartbeat_time.iso or '' }}" title="{{ task.heartbeat_time.title or '' }}">{{ task.heartbeat_time.text }}</time>{% else %}-{% endif %}</dd>
+  </dl>
+
+  <h3>诊断</h3>
+  {% if task.diagnostics %}
+  <table class="grid compact">
+    <thead><tr><th>级别</th><th>代码</th><th>信息</th><th>位置</th></tr></thead>
+    <tbody>
+    {% for diagnostic in task.diagnostics %}
+      <tr>
+        <td><span class="severity severity-{{ diagnostic.severity }}" title="{{ diagnostic.severity }}">{{ diagnostic.severity_label }}</span></td>
+        <td><code>{{ diagnostic.code }}</code></td>
+        <td>{{ diagnostic.message }}</td>
+        <td>{% if diagnostic.path %}<code>{{ diagnostic.path }}</code>{% if diagnostic.line %}:{{ diagnostic.line }}{% endif %}{% else %}-{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">该任务没有诊断记录。</p>
+  {% endif %}
+
+  <details>
+    <summary>冻结的项目配置（JSON）</summary>
+    <pre class="effective">{{ task.config_text }}</pre>
+  </details>
+  <details>
+    <summary>提交的请求参数（JSON）</summary>
+    <pre class="effective">{{ task.request_text }}</pre>
+  </details>
+</details>
+{% endblock %}

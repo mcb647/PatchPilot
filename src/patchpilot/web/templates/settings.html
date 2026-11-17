@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+{% block title %}项目设置 &middot; PatchPilot{% endblock %}
+{% block content %}
+<p class="breadcrumb"><a href="/">&larr; 分析历史</a></p>
+<h1>项目设置</h1>
+
+{% if saved %}
+<div class="notice notice-ok">配置已保存。修改 web.host / web.port 等字段需要重启 Web 服务后生效。</div>
+{% endif %}
+{% if error_message %}
+<div class="notice {{ 'notice-warn' if conflict else 'notice-error' }}">{{ error_message }}</div>
+{% endif %}
+{% if settings_notice %}
+<div class="notice notice-warn">{{ settings_notice }}</div>
+{% endif %}
+
+<section class="settings-meta">
+  <dl class="facts">
+    <dt>配置文件</dt>
+    <dd>{% if settings.path %}<code>{{ settings.path }}</code>{% else %}尚未创建（保存后会写入 <code>.patchpilot.yaml</code>）{% endif %}</dd>
+    <dt>来源</dt>
+    <dd title="{{ settings.source }}">{{ settings.source_label }}</dd>
+    <dt>文件摘要</dt>
+    <dd><code>{{ settings.digest or "-" }}</code></dd>
+    <dt>操作</dt>
+    <dd>常用配置可直接在结构化表单中修改；高级项与 YAML 原文在页面底部展开。保存前必须先预览确认差异。</dd>
+  </dl>
+</section>
+
+{% if structured %}
+<form id="settings-structured-form" class="settings-structured" method="post" action="/settings/preview" data-structured="1">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="form_mode" value="structured">
+  <input type="hidden" name="expected_digest" value="{{ expected_digest }}">
+  {% if structured_preview and preview %}<input type="hidden" name="preview_digest" value="{{ preview.preview_digest }}">{% endif %}
+  <p class="meta">无需打开 YAML：修改下方常用配置后点击“预览变更”，确认差异后再保存；每个字段可勾选“移除覆盖（使用默认）”。</p>
+
+  {% for group in structured.groups %}
+  {% if group.fields %}
+  <section class="settings-group" id="settings-group-{{ group.id }}" data-group="{{ group.id }}">
+    <h2>{{ group.title }} <span class="meta">{{ group.description }}</span></h2>
+    {% if group.id == "advanced" %}
+    <details class="advanced-fields">
+      <summary>高级参数（{{ group.fields|length }} 项，通常无需修改）</summary>
+    {% endif %}
+    <div class="settings-grid">
+      {% for field in group.fields %}
+      <div class="settings-field field-kind-{{ field.kind }}{% if field.error %} field-invalid{% endif %}"
+           data-field-path="{{ field.path }}" data-field-kind="{{ field.kind }}"
+           data-field-source="{{ field.source }}"{% if field.restart %} data-restart="1"{% endif %}>
+        <label class="field-label" for="field-{{ field.path|replace('.', '-') }}">{{ field.label }}
+          {% if field.restart %}<span class="chip chip-warn" title="修改后需要重启 Web 服务">需重启</span>{% endif %}
+        </label>
+
+        {% if field.kind in ("select", "tristate", "bool") %}
+        <select id="field-{{ field.path|replace('.', '-') }}" name="{{ field.path }}" title="{{ field.help }}">
+          {% if field.kind == "tristate" %}
+            {% for option in field.tristate_options %}
+            <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          {% elif field.kind == "bool" %}
+            {% for option in field.bool_options %}
+            <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          {% else %}
+            {% for option in field.choices %}
+            <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}（{{ option.value }}）</option>
+            {% endfor %}
+          {% endif %}
+        </select>
+        {% elif field.kind == "radio" %}
+        <div class="radio-row">
+          {% for option in field.choices %}
+          <label class="radio"><input type="radio" name="{{ field.path }}" value="{{ option.value }}"{% if option.selected %} checked{% endif %}> {{ option.label }}</label>
+          {% endfor %}
+        </div>
+        {% elif field.kind == "list" %}
+        <textarea id="field-{{ field.path|replace('.', '-') }}" name="{{ field.path }}" rows="{{ field.rows }}" spellcheck="false" class="code-input" title="{{ field.help }}">{{ field.display }}</textarea>
+        <p class="field-help">每行一条；留空表示显式空列表，勾选“移除覆盖”才恢复默认。</p>
+        {% elif field.kind in ("int", "float") %}
+        <input id="field-{{ field.path|replace('.', '-') }}" type="number" name="{{ field.path }}" value="{{ field.display }}"{% if field.minimum is not none %} min="{{ field.minimum }}"{% endif %}{% if field.maximum is not none %} max="{{ field.maximum }}"{% endif %}{% if field.kind == "float" %} step="0.01"{% endif %} title="{{ field.help }}">
+        {% else %}
+        <input id="field-{{ field.path|replace('.', '-') }}" type="text" name="{{ field.path }}" value="{{ field.display }}" title="{{ field.help }}">
+        {% endif %}
+
+        {% if field.kind != "list" %}
+        <p class="field-help">{{ field.help }}{% if field.unit %} &middot; 单位：{{ field.unit }}{% endif %}{% if field.has_range %} &middot; 范围：{{ field.minimum if field.minimum is not none else "-" }} ~ {{ field.maximum if field.maximum is not none else "-" }}{% endif %}</p>
+        {% elif field.unit or field.has_range %}
+        <p class="field-help">{% if field.unit %}单位：{{ field.unit }}{% endif %}{% if field.has_range %} 范围：{{ field.minimum if field.minimum is not none else "-" }} ~ {{ field.maximum if field.maximum is not none else "-" }}{% endif %}</p>
+        {% endif %}
+
+        <p class="field-source meta" data-source="{{ field.source }}">来源：{{ field.source_label }}</p>
+        {% if field.conditional_note %}
+        <p class="field-conditional meta" data-conditional="{{ field.conditional }}">{{ field.conditional_note }}</p>
+        {% endif %}
+        <label class="checkbox field-reset">
+          <input type="checkbox" name="{{ field.reset_name }}" value="1"{% if field.reset %} checked{% endif %}>
+          移除覆盖（使用默认）
+        </label>
+        {% if field.error %}<p class="field-error" role="alert">{{ field.error }}</p>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if group.id == "advanced" %}</details>{% endif %}
+
+    {% if group.id == "service" and structured.runtime %}
+    <h3>项目已保存值 vs 当前运行实例实际值（只读）</h3>
+    <p class="meta">这里只用于核对；实际监听地址来自当前请求 Host，数据库路径由启动参数决定，修改上方字段不会立即影响正在运行的实例。</p>
+    <table class="grid compact runtime-table" data-runtime-table="1">
+      <thead><tr><th>字段</th><th>项目已保存值</th><th>当前运行实例实际值</th></tr></thead>
+      <tbody>
+      {% for row in structured.runtime %}
+        <tr data-runtime-path="{{ row.path }}">
+          <td><code>{{ row.path }}</code><br><span class="meta">{{ row.label }}</span></td>
+          <td>{{ row.saved }}</td>
+          <td>{{ row.runtime }}{% if row.differs %} <span class="chip chip-warn">与保存值不同</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+  {% endif %}
+  {% endfor %}
+
+  <div class="form-actions">
+    <button class="button" type="submit" formaction="/settings/preview">预览变更</button>
+    {% if structured_preview and preview and preview.ok %}
+    <button class="button button-primary" type="submit" formaction="/settings/save">保存配置</button>
+    {% else %}
+    <span class="meta">先预览并确认差异后才可以保存。</span>
+    {% endif %}
+  </div>
+</form>
+{% endif %}
+
+<details class="yaml-editor"{% if not structured %} open{% endif %}>
+  <summary>高级：YAML 原文编辑（保留注释；旧表单仍可用）</summary>
+  <form class="settings-form" method="post" action="/settings/preview">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="form_mode" value="raw">
+    <input type="hidden" name="expected_digest" value="{{ expected_digest }}">
+    {% if preview %}<input type="hidden" name="preview_digest" value="{{ preview.preview_digest }}">{% endif %}
+    <label class="field-label" for="raw">配置原文（YAML，保留注释与格式）</label>
+    <textarea id="raw" name="raw" rows="24" spellcheck="false" class="code-input">{{ raw }}</textarea>
+    <div class="form-actions">
+      <button class="button" type="submit" formaction="/settings/preview">预览 YAML</button>
+      {% if preview and preview.ok %}
+      <button class="button button-primary" type="submit" formaction="/settings/save">保存配置</button>
+      {% else %}
+      <span class="meta">先预览并确认差异后才可以保存。</span>
+      {% endif %}
+    </div>
+  </form>
+</details>
+
+{% if preview %}
+<section class="preview">
+  <h2>预览结果</h2>
+  {% if preview.ok %}
+  <div class="notice notice-ok">配置语法与取值有效。</div>
+  {% else %}
+  <div class="notice notice-error">配置存在错误，未保存。</div>
+  {% endif %}
+  {% if structured_preview %}
+  <p class="meta">以上为结构化表单预览；确认后点击“保存配置”。</p>
+  {% endif %}
+  {% if preview.warnings %}
+  <div class="notice notice-warn">
+    <ul class="plain-list">
+      {% for warning in preview.warnings %}<li>{{ warning }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if preview.errors %}
+  <table class="grid compact">
+    <thead><tr><th>字段</th><th>错误</th><th class="num">行号</th></tr></thead>
+    <tbody>
+    {% for error in preview.errors %}
+      <tr>
+        <td><code>{{ error.field or "-" }}</code></td>
+        <td>{{ error.message }}</td>
+        <td class="num">{{ error.line or "-" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  <h3>生效值变化</h3>
+  {% if preview.diff %}
+  <table class="grid compact">
+    <thead><tr><th>字段</th><th>旧值</th><th>新值</th></tr></thead>
+    <tbody>
+    {% for item in preview.diff %}
+      <tr>
+        <td><code>{{ item.field }}</code></td>
+        <td><pre class="inline-value">{{ item.old }}</pre></td>
+        <td><pre class="inline-value">{{ item.new }}</pre></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">生效值没有变化。</p>
+  {% endif %}
+  <details>
+    <summary>预览后的完整生效配置（JSON）</summary>
+    <pre class="effective">{{ preview.effective_text }}</pre>
+  </details>
+</section>
+{% endif %}
+
+<section>
+  <h2>字段说明</h2>
+  <table class="grid compact">
+    <thead><tr><th>字段</th><th>说明</th></tr></thead>
+    <tbody>
+    {% for note in field_notes %}
+      <tr><td><code>{{ note.field }}</code></td><td>{{ note.note }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>当前生效配置</h2>
+  <details>
+    <summary>展开 JSON</summary>
+    <pre class="effective">{{ settings.effective_text }}</pre>
+  </details>
+</section>
+{% endblock %}

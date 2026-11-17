@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "patchpilot"
+version = "0.2.3"
+description = "Trace the impact of Python changes and keep an auditable local history"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "PatchPilot contributors" }]
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "jinja2>=3.1",
+    "PyYAML>=6.0",
+    "ruamel.yaml>=0.18",
+]
+
+[project.scripts]
+patchpilot = "patchpilot.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+patchpilot = [
+    "migrations/*.sql",
+    "web/templates/*.html",
+    "web/static/*.css",
+    "web/static/*.js",
+    "web/static/vendor/*",
+]
